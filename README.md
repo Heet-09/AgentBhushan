@@ -113,3 +113,107 @@ project = SCRUM AND issuetype = Bug ORDER BY created DESC
 | `parse_excel.py` | Parse the workbook, print sheets, extract failed rows |
 | `create_jira_bugs.py` | Create Jira bugs from `failed.json` |
 
+# Defect Grouping Logic
+## 1. Objective
+
+Prevent duplicate Jira bug creation when multiple failed test cases are caused by the same underlying defect.
+
+A common Excel column named `Defect Group` will be used to identify test cases that belong to the same defect.
+
+**Core rule:** One defect group should generate one Jira bug candidate, regardless of how many test cases fail within that group.
+
+## 2. Excel Input
+
+The Excel test execution report should contain these columns:
+
+| Column | Description |
+|---|---|
+| Test Case ID | Unique test case identifier |
+| Test Case | Test case title or description |
+| Status | Pass, Fail, Blocked, or Not Run |
+| Expected Result | Expected application behavior |
+| Actual Result | Actual behavior observed during execution |
+| Severity | Severity of the defect |
+| Defect Group | Common identifier for failures caused by the same defect |
+| Existing Jira ID | Jira issue key if the defect has already been reported |
+
+## 3. Example
+
+| Test Case ID | Status | Actual Result | Defect Group | Existing Jira ID |
+|---|---|---|---|---|
+| TC001 | Fail | Formula displays 150 instead of 150.00 | DG-001 | |
+| TC002 | Fail | Formula displays 250 instead of 250.00 | DG-001 | |
+| TC003 | Fail | Subtotal is calculated incorrectly | DG-002 | |
+| TC004 | Fail | Formula value has missing decimal places | DG-001 | |
+| TC005 | Pass | Search results are displayed correctly | | |
+
+### Expected Output
+
+- `DG-001`: One Jira bug candidate containing TC001, TC002, and TC004.
+- `DG-002`: One Jira bug candidate containing TC003.
+- TC005: No bug candidate because the test case passed.
+
+**Result: 4 failed test cases produce 2 Jira bug candidates.**
+
+## 4. Grouping Rules
+
+1. Only test cases with status `Fail` are eligible for bug generation.
+2. Failed test cases with the same non-empty `Defect Group` must be combined into one bug candidate.
+3. Different defect group identifiers must produce separate bug candidates.
+4. Failed test cases with a blank `Defect Group` must remain separate candidates. Blank groups must never be combined with each other automatically.
+5. Passed, Blocked, and Not Run test cases must not generate bug candidates.
+6. If an `Existing Jira ID` is provided, validate the issue before linking the related failures. Do not create another bug for the same group by default.
+7. If a group contains conflicting Jira issue IDs, flag it for manual review.
+8. The tester must review and approve bug candidates before Jira tickets are created.
+9. The tool must prevent repeated submissions from creating duplicate tickets.
+10. If the same defect group contains different severity values, flag the conflict or apply an explicitly approved severity rule.
+
+## 5. Processing Flow
+
+```text
+Upload Excel Report
+        |
+        v
+Validate Required Columns
+        |
+        v
+Filter Failed Test Cases
+        |
+        v
+Separate Grouped and Ungrouped Failures
+        |
+        v
+Group by Defect Group
+        |
+        v
+Check Existing Jira ID
+        |
+        v
+Generate Bug Candidates
+        |
+        v
+Tester Reviews and Approves
+        |
+        v
+Create Jira Bug or Link Existing Issue
+        |
+        v
+Generate Processing Report
+```
+
+## 6. Important Considerations
+
+- `Defect Group` is the primary grouping mechanism in the initial version.
+- Testers are responsible for assigning the same group only when failures are believed to originate from the same underlying defect.
+- Similar error messages do not necessarily mean that failures have the same root cause.
+- The tool should preserve individual test case IDs, steps, expected results, and actual results within the consolidated bug description.
+- The tool must not silently discard failures when grouping them.
+- Jira creation results should be recorded so that a repeated upload can be handled safely.
+
+## 7. Future Enhancement
+
+In a future version, the tool can suggest defect groups automatically using test case descriptions, failed steps, actual results, error messages, and module information.
+
+The tester should be able to confirm or modify these suggestions before bug creation.
+
+Automatic grouping should be introduced only after the initial Defect Group-based approach works reliably.
